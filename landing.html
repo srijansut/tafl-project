@@ -1,0 +1,548 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>TuringVisual — Turing Machine IDE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #050d1a;
+            --accent: #38bdf8;
+            --accent2: #fbbf24;
+            --text: #f1f5f9;
+            --muted: #64748b;
+            --card: #0f1f36;
+            --border: #1e3a5f;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Syne', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        /* ── NOISE GRAIN OVERLAY ── */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+            pointer-events: none; z-index: 9999; opacity: 0.35;
+        }
+
+        /* ── GRID BACKGROUND ── */
+        .grid-bg {
+            position: fixed; inset: 0; z-index: 0;
+            background-image:
+                linear-gradient(rgba(56,189,248,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56,189,248,0.04) 1px, transparent 1px);
+            background-size: 48px 48px;
+        }
+
+        /* ── GLOW BLOBS ── */
+        .blob {
+            position: fixed; border-radius: 50%; filter: blur(120px); pointer-events: none; z-index: 0;
+        }
+        .blob-1 { width: 500px; height: 500px; background: rgba(56,189,248,0.08); top: -100px; right: -100px; }
+        .blob-2 { width: 400px; height: 400px; background: rgba(251,191,36,0.06); bottom: 10%; left: -80px; }
+
+        /* ── NAV ── */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 18px 60px;
+            background: rgba(5,13,26,0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800; font-size: 1.3rem; letter-spacing: -0.5px;
+        }
+        .logo span { color: var(--accent); }
+
+        nav a {
+            color: var(--muted); text-decoration: none; font-size: 0.9rem;
+            font-family: 'Space Mono', monospace;
+            transition: color 0.2s;
+        }
+        nav a:hover { color: var(--accent); }
+
+        .nav-links { display: flex; gap: 32px; }
+
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 24px; border-radius: 4px; font-weight: 700;
+            text-decoration: none; cursor: pointer; transition: 0.2s;
+            font-family: 'Space Mono', monospace; font-size: 0.85rem;
+            border: none;
+        }
+        .btn-primary {
+            background: var(--accent); color: #020617;
+        }
+        .btn-primary:hover { background: #7dd3fc; transform: translateY(-1px); }
+
+        .btn-ghost {
+            background: transparent; color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ── HERO ── */
+        #hero {
+            position: relative; z-index: 1;
+            min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 120px 40px 60px;
+        }
+
+        .hero-tag {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.75rem; letter-spacing: 3px; text-transform: uppercase;
+            color: var(--accent); margin-bottom: 24px;
+            border: 1px solid rgba(56,189,248,0.3);
+            padding: 6px 16px; border-radius: 100px;
+            display: inline-block;
+            animation: fadeUp 0.6s ease both;
+        }
+
+        h1 {
+            font-size: clamp(3rem, 8vw, 6.5rem);
+            font-weight: 800; line-height: 1.0;
+            letter-spacing: -3px;
+            animation: fadeUp 0.6s 0.1s ease both;
+        }
+
+        h1 em {
+            font-style: normal;
+            color: transparent;
+            -webkit-text-stroke: 1px var(--accent);
+        }
+
+        .hero-sub {
+            max-width: 580px;
+            font-size: 1.1rem; color: var(--muted);
+            line-height: 1.7; margin: 28px auto 0;
+            font-family: 'Space Mono', monospace; font-size: 0.9rem;
+            animation: fadeUp 0.6s 0.2s ease both;
+        }
+
+        .hero-cta {
+            display: flex; gap: 16px; justify-content: center;
+            margin-top: 44px; flex-wrap: wrap;
+            animation: fadeUp 0.6s 0.3s ease both;
+        }
+
+        /* ── TAPE ANIMATION ── */
+        .tape-demo {
+            margin-top: 80px; width: 100%; max-width: 900px;
+            position: relative;
+            animation: fadeUp 0.8s 0.4s ease both;
+        }
+
+        .tape-track {
+            display: flex; gap: 6px;
+            justify-content: center; align-items: center;
+            overflow: hidden; padding: 10px 0;
+        }
+
+        .demo-cell {
+            min-width: 52px; height: 52px;
+            background: var(--card);
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'Space Mono', monospace;
+            font-size: 1.3rem; font-weight: 700; color: var(--text);
+            transition: all 0.35s ease;
+            flex-shrink: 0;
+        }
+
+        .demo-cell.active {
+            border-color: var(--accent);
+            background: #0c4a6e;
+            transform: scale(1.12);
+            box-shadow: 0 0 20px rgba(56,189,248,0.3);
+        }
+
+        .tape-head {
+            position: absolute; bottom: -2px;
+            width: 0; height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 14px solid var(--accent);
+            transition: left 0.35s cubic-bezier(0.4,0,0.2,1);
+            filter: drop-shadow(0 0 6px var(--accent));
+        }
+
+        /* ── FEATURES ── */
+        #features {
+            position: relative; z-index: 1;
+            padding: 100px 60px;
+            max-width: 1200px; margin: 0 auto;
+        }
+
+        .section-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.7rem; letter-spacing: 3px; text-transform: uppercase;
+            color: var(--accent); margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 800; letter-spacing: -1.5px;
+            line-height: 1.1; margin-bottom: 60px;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2px;
+        }
+
+        .feature-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            padding: 40px 36px;
+            position: relative; overflow: hidden;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(56,189,248,0.4);
+            transform: translateY(-4px);
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, var(--accent), transparent);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .feature-card:hover::before { opacity: 1; }
+
+        .feature-icon {
+            font-size: 2rem; margin-bottom: 20px;
+            display: block;
+        }
+
+        .feature-title {
+            font-size: 1.1rem; font-weight: 700;
+            margin-bottom: 12px; letter-spacing: -0.3px;
+        }
+
+        .feature-desc {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem; color: var(--muted);
+            line-height: 1.8;
+        }
+
+        .feature-num {
+            position: absolute; top: 20px; right: 24px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.7rem; color: var(--border);
+            letter-spacing: 2px;
+        }
+
+        /* ── HOW IT WORKS ── */
+        #how {
+            position: relative; z-index: 1;
+            padding: 80px 60px;
+            background: linear-gradient(180deg, transparent, rgba(56,189,248,0.03), transparent);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .how-inner { max-width: 1100px; margin: 0 auto; }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0;
+            margin-top: 60px;
+            position: relative;
+        }
+
+        .steps::before {
+            content: '';
+            position: absolute;
+            top: 32px; left: 8%; right: 8%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), var(--border), transparent);
+        }
+
+        .step {
+            text-align: center; padding: 0 24px;
+            position: relative;
+        }
+
+        .step-num {
+            width: 64px; height: 64px; border-radius: 50%;
+            background: var(--bg); border: 2px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'Space Mono', monospace;
+            font-size: 1.2rem; font-weight: 700; color: var(--accent);
+            margin: 0 auto 24px;
+            position: relative; z-index: 1;
+        }
+
+        .step-title { font-weight: 700; margin-bottom: 10px; font-size: 1rem; }
+        .step-desc {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.78rem; color: var(--muted); line-height: 1.7;
+        }
+
+        /* ── RULES DEMO ── */
+        .rules-block {
+            background: #020617; border: 1px solid var(--border);
+            border-radius: 8px; padding: 24px 28px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.85rem; color: #10b981;
+            line-height: 2;
+            max-width: 380px;
+        }
+
+        .rules-block .comment { color: var(--muted); }
+
+        /* ── CTA SECTION ── */
+        #cta {
+            position: relative; z-index: 1;
+            text-align: center; padding: 120px 40px;
+        }
+
+        #cta h2 {
+            font-size: clamp(2.5rem, 5vw, 4.5rem);
+            font-weight: 800; letter-spacing: -2px;
+            line-height: 1.05; margin-bottom: 24px;
+        }
+
+        #cta p {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.9rem; color: var(--muted);
+            max-width: 480px; margin: 0 auto 40px; line-height: 1.8;
+        }
+
+        /* ── FOOTER ── */
+        footer {
+            position: relative; z-index: 1;
+            border-top: 1px solid var(--border);
+            padding: 32px 60px;
+            display: flex; justify-content: space-between; align-items: center;
+            font-family: 'Space Mono', monospace; font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        /* ── ANIMATIONS ── */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .cursor { animation: blink 1s step-start infinite; }
+
+        /* ── SCROLLBAR ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+
+<!-- NAV -->
+<nav>
+    <div class="logo">Turing<span>Visual</span></div>
+    <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#cta">Docs</a>
+    </div>
+    <a class="btn btn-primary" href="1.html">Launch IDE →</a>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+    <div class="hero-tag">// Theoretical CS · Made Visual</div>
+    <h1>See the<br><em>Machine</em><br>Think.</h1>
+    <p class="hero-sub">
+        TuringVisual is an interactive IDE for designing, running, and visualizing<br>
+        Turing machines — state by state, symbol by symbol.<span class="cursor">_</span>
+    </p>
+    <div class="hero-cta">
+        <a class="btn btn-primary" href="1.html">Launch IDE →</a>
+        <a class="btn btn-ghost" href="#how">How it works</a>
+    </div>
+
+    <!-- TAPE DEMO -->
+    <div class="tape-demo">
+        <div class="tape-track" id="demo-tape">
+            <div class="demo-cell">B</div>
+            <div class="demo-cell">B</div>
+            <div class="demo-cell active">1</div>
+            <div class="demo-cell">1</div>
+            <div class="demo-cell">0</div>
+            <div class="demo-cell">1</div>
+            <div class="demo-cell">0</div>
+            <div class="demo-cell">0</div>
+            <div class="demo-cell">B</div>
+            <div class="demo-cell">B</div>
+        </div>
+        <div class="tape-head" id="demo-head"></div>
+    </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+    <div class="section-label">// what's inside</div>
+    <h2 class="section-title">Everything you need<br>to study computation.</h2>
+    <div class="features-grid">
+        <div class="feature-card">
+            <span class="feature-num">01</span>
+            <span class="feature-icon">📼</span>
+            <div class="feature-title">Infinite Tape Visualizer</div>
+            <p class="feature-desc">Watch the read/write head traverse the tape in real time. Active cells are highlighted with smooth animations and the head pointer stays pixel-perfect.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-num">02</span>
+            <span class="feature-icon">🔵</span>
+            <div class="feature-title">Live State-Space Graph</div>
+            <p class="feature-desc">The transition diagram updates as you edit rules. Active states and edges glow as the machine runs, giving you spatial intuition for the computation.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-num">03</span>
+            <span class="feature-icon">📋</span>
+            <div class="feature-title">Full Execution Trace</div>
+            <p class="feature-desc">Every transition is logged: current state, symbol read, symbol written, direction, and next state — so you can audit every decision the machine makes.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-num">04</span>
+            <span class="feature-icon">⚙️</span>
+            <div class="feature-title">Editable Rule Table</div>
+            <p class="feature-desc">Write rules in plain CSV syntax: <code>state, read, write, dir, next</code>. Reload instantly and the graph re-renders to reflect your changes.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-num">05</span>
+            <span class="feature-icon">▶️</span>
+            <div class="feature-title">Run / Step / Pause</div>
+            <p class="feature-desc">Run continuously at adjustable speed, step through one transition at a time, or pause mid-computation to inspect state. You control the clock.</p>
+        </div>
+        <div class="feature-card">
+            <span class="feature-num">06</span>
+            <span class="feature-icon">🎓</span>
+            <div class="feature-title">Zero Setup</div>
+            <p class="feature-desc">Pure HTML/CSS/JS — no build tools, no dependencies. Open in a browser and start experimenting. Ideal for classrooms and self-study.</p>
+        </div>
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="how">
+    <div class="how-inner">
+        <div class="section-label">// workflow</div>
+        <h2 class="section-title">From rules to<br>running machine.</h2>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; margin-top: 48px; flex-wrap: wrap;">
+            <div class="rules-block">
+                <div class="comment"># state, read, write, dir, next</div>
+                q0, 1, 0, R, q0<br>
+                q0, 0, 1, R, q0<br>
+                q0, B, B, L, halt<br>
+                <br>
+                <div class="comment"># multi-state example</div>
+                q0, 0, 0, R, q1<br>
+                q1, 1, 1, L, q0<br>
+                q1, B, B, R, halt
+            </div>
+            <div>
+                <div class="steps" style="grid-template-columns: 1fr; gap: 32px; display: flex; flex-direction: column;">
+                    <div class="steps::before" style="display:none"></div>
+                    <div style="display: flex; gap: 20px; align-items: flex-start;">
+                        <div class="step-num" style="min-width:52px; height:52px; font-size:1rem;">01</div>
+                        <div>
+                            <div class="step-title">Write your transition rules</div>
+                            <div class="step-desc">Define each rule as a CSV row: current state, symbol to read, symbol to write, direction (L/R), and next state.</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 20px; align-items: flex-start;">
+                        <div class="step-num" style="min-width:52px; height:52px; font-size:1rem;">02</div>
+                        <div>
+                            <div class="step-title">Load your input string</div>
+                            <div class="step-desc">Type a binary string (or any symbols) into the input field. The tape initializes with blank padding on each side.</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 20px; align-items: flex-start;">
+                        <div class="step-num" style="min-width:52px; height:52px; font-size:1rem;">03</div>
+                        <div>
+                            <div class="step-title">Run, step, or pause</div>
+                            <div class="step-desc">Watch the tape and graph animate in sync. Read the execution trace to understand every transition taken.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+    <h2>Ready to simulate<br>computation?</h2>
+    <p>Spin up the IDE in one click. No installation. No account. Just theory, made interactive.</p>
+    <a class="btn btn-primary" href="1.html" style="font-size:1rem; padding:14px 36px;">Launch TuringVisual →</a>
+</section>
+
+<footer>
+    <div class="logo" style="font-size:1rem;">Turing<span style="color:var(--accent)">Visual</span></div>
+    <div>Built for learners of theoretical computer science.</div>
+    <div>MIT License · Open Source</div>
+</footer>
+
+<script>
+    // Animate demo tape head
+    const cells = document.querySelectorAll('.demo-cell');
+    const head = document.getElementById('demo-head');
+    const track = document.getElementById('demo-tape');
+    const TAPE = ['B','B','1','1','0','1','0','0','B','B'];
+    const FLIPPED = ['B','B','0','0','1','0','1','1','B','B'];
+
+    let idx = 2, forward = true;
+
+    function updateHead() {
+        cells.forEach((c, i) => {
+            c.classList.toggle('active', i === idx);
+            c.textContent = TAPE[i];
+        });
+
+        // Position head pointer centered under active cell
+        const trackRect = track.getBoundingClientRect();
+        const cellRect = cells[idx].getBoundingClientRect();
+        const pos = cellRect.left - trackRect.left + cellRect.width / 2 - 10;
+        head.style.left = pos + 'px';
+    }
+
+    updateHead();
+
+    setInterval(() => {
+        cells[idx].textContent = forward ? FLIPPED[idx] : TAPE[idx];
+        idx += forward ? 1 : -1;
+        if (idx >= 8) { forward = false; idx = 7; }
+        if (idx <= 2) { forward = true;  idx = 2; }
+        updateHead();
+    }, 600);
+</script>
+
+</body>
+</html>
