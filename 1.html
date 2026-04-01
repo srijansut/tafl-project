@@ -1,0 +1,358 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Turing IDE: Visual State-Space</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --text-main: #f1f5f9;
+            --accent: #38bdf8;
+            --accent-graph: #fbbf24;
+            --cell-size: 50px;
+            --gap: 4px;
+        }
+
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        header { padding: 10px 20px; background: rgba(15, 23, 42, 0.9); border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+
+        #app-container { 
+            display: grid; 
+            grid-template-columns: 250px 1fr 300px; 
+            grid-template-rows: 140px 1fr; 
+            flex-grow: 1; 
+            gap: 10px; 
+            padding: 10px; 
+            overflow: hidden; 
+        }
+
+        .panel { background: var(--panel-bg); border-radius: 8px; border: 1px solid #334155; padding: 15px; display: flex; flex-direction: column; overflow: hidden; }
+
+        #tape-panel { grid-column: 1 / 3; grid-row: 1; display: flex; flex-direction: column; justify-content: space-between; position: relative; }
+        
+        #tape-viewport {
+            width: 100%; height: 90px; background: #020617; border-radius: 6px;
+            position: relative; overflow: hidden;
+            border: 1px solid #334155;
+        }
+
+        #tape-scroll-inner {
+            display: flex;
+            gap: var(--gap);
+            align-items: center;
+            height: 100%;
+            position: absolute;
+            left: 50%;
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .cell {
+            min-width: var(--cell-size); height: var(--cell-size); background: #334155; color: white;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 1.4rem; font-weight: bold;
+            border-radius: 4px; border: 2px solid transparent;
+            flex-shrink: 0;
+            transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
+        }
+
+        .cell.active { 
+            border-color: var(--accent); 
+            background: #0c4a6e;
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+            z-index: 10;
+        }
+
+        /* ✅ REMOVED: #head-pointer CSS block deleted entirely */
+
+        .controls { display: flex; gap: 8px; justify-content: center; margin-top: 5px; }
+        button { background: #334155; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        button:hover { background: #475569; }
+        button.primary { background: var(--accent); color: #020617; }
+
+        #log-panel { grid-column: 1; grid-row: 2; } 
+        #graph-panel { grid-column: 2; grid-row: 2; } 
+        #rules-panel { grid-column: 3; grid-row: 1 / 3; } 
+        #graph-svg { width: 100%; height: 100%; background: #020617; border-radius: 6px; }
+
+        textarea { background: #0f172a; color: #10b981; border: 1px solid #334155; border-radius: 6px; padding: 10px; font-family: monospace; height: 100%; width: 100%; box-sizing: border-box; resize: none; }
+        #log { flex-grow: 1; overflow-y: auto; font-size: 0.75rem; color: #94a3b8; font-family: monospace; background: #020617; padding: 10px; border-radius: 4px; border: 1px solid #334155; }
+        
+        .node circle { fill: var(--panel-bg); stroke: #64748b; stroke-width: 2px; transition: 0.3s; }
+        .node.active circle { stroke: var(--accent); fill: #0c4a6e; }
+        .node.halt circle { stroke: #ef4444; fill: #7f1d1d; }
+        .node text { fill: white; font-size: 14px; font-weight: bold; pointer-events: none; }
+        .edge path { fill: none; stroke: #475569; stroke-width: 1.5px; transition: 0.3s; marker-end: url(#arrowhead); }
+        .edge.active path { stroke: var(--accent-graph); stroke-width: 3px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div style="display:flex; align-items:center; gap:10px">
+        <a href="landing.html" style="color:var(--text-main); text-decoration:none;">
+            <h2 style="margin:0">Turing<span style="color:var(--accent)">Visual</span></h2>
+        </a>
+        <div id="status-badge" style="background:#0c4a6e; color:var(--accent); padding:4px 12px; border-radius:16px; font-weight:bold; font-size:0.9rem">Current: q0</div>
+    </div>
+    <div style="font-size:0.8rem; color:#475569; font-family:monospace;">state, read, write, dir, next</div>
+</header>
+
+<div id="app-container">
+    <div class="panel" id="log-panel">
+        <h4 style="margin-top:0">Execution Trace</h4>
+        <div id="log"></div>
+    </div>
+
+    <div class="panel" id="tape-panel">
+        <div id="tape-viewport">
+            <div id="tape-scroll-inner"></div>
+            <!-- ✅ REMOVED: <div id="head-pointer"></div> deleted entirely -->
+        </div>
+        <div class="controls">
+            <input type="text" id="input-string" value="110100" style="background:#020617; color:white; border:1px solid #334155; padding:8px; border-radius:4px; width:120px;">
+            <button class="primary" onclick="tm.load()">Load</button>
+            <button onclick="tm.run()">Run</button>
+            <button onclick="tm.pause()">Pause</button>
+            <button onclick="tm.step()">Step →</button>
+        </div>
+    </div>
+
+    <div class="panel" id="graph-panel">
+        <h3 style="margin-top:0">State Space Diagram</h3>
+        <svg id="graph-svg"></svg>
+    </div>
+
+    <div class="panel" id="rules-panel">
+        <h4 style="margin-top:0">Rules</h4>
+        <textarea id="rules-raw">q0,1,0,R,q0
+q0,0,1,R,q0
+q0,B,B,L,halt</textarea>
+        <button onclick="tm.parseRules()" style="margin-top:8px; width:100%">Update Graph</button>
+    </div>
+</div>
+
+<svg width="0" height="0">
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#475569" />
+        </marker>
+    </defs>
+</svg>
+
+<script>
+    const tm = {
+        tape: [], head: 0, state: 'q0', rules: [], isRunning: false, timer: null,
+        
+        init() {
+            this.parseRules();
+            this.load();
+        },
+
+        parseRules() {
+            const raw = document.getElementById('rules-raw').value;
+            this.rules = raw.split('\n').filter(l => l.trim()).map(l => {
+                const [s, r, w, m, ns] = l.split(',').map(x => x.trim());
+                return {s, r, w, m, ns};
+            });
+            graphRenderer.render(this.rules);
+        },
+
+        load() {
+            this.pause();
+            const val = document.getElementById('input-string').value || "B";
+            this.tape = [...Array(10).fill('B'), ...val.split(''), ...Array(10).fill('B')];
+            this.head = 10;
+            this.state = 'q0';
+            document.getElementById('log').innerHTML = '';
+            this.log(`<span style="color:#38bdf8">▶ Machine loaded.</span> Input: <b>${val}</b> | Tape length: ${this.tape.length}`);
+            this.renderTape(null, true);
+            graphRenderer.highlightActive(this.state, null);
+        },
+
+        step() {
+            if (this.state === 'halt') {
+                this.pause();
+                return false;
+            }
+
+            const symbol = this.tape[this.head] || 'B';
+            const rule = this.rules.find(r => r.s === this.state && r.r === symbol);
+
+            if (!rule) {
+                this.log(`<span style="color:#ef4444">✖ NO RULE</span> — Machine stopped at (${this.state}, "${symbol}").`);
+                this.pause();
+                return false;
+            }
+
+            const prevState = this.state;
+            const prevHead = this.head;
+
+            this.tape[this.head] = rule.w;
+            this.head += (rule.m.toUpperCase() === 'R' ? 1 : -1);
+            this.state = rule.ns;
+
+            if (this.head < 0) { this.tape.unshift('B'); this.head = 0; }
+            if (this.head >= this.tape.length) this.tape.push('B');
+
+            const arrow = rule.m.toUpperCase() === 'R' ? '→' : '←';
+            this.log(
+                `<span style="color:#64748b">pos[${prevHead}]</span> ` +
+                `<span style="color:#fbbf24">(${prevState}, "${symbol}")</span> ` +
+                `<span style="color:#94a3b8">write=</span><b style="color:white">"${rule.w}"</b> ` +
+                `<span style="color:#94a3b8">move=</span><b style="color:var(--accent)">${arrow}</b> ` +
+                `<span style="color:#94a3b8">→</span> ` +
+                `<span style="color:#10b981">${this.state}</span>`
+            );
+
+            this.renderTape(rule, false);
+
+            if (this.state === 'halt') {
+                this.log(`<span style="color:#10b981; font-weight:bold;">✔ HALTED SUCCESSFULLY</span>`);
+                this.pause();
+                return false;
+            }
+
+            return true;
+        },
+
+        run() {
+            if (this.isRunning) return;
+            this.isRunning = true;
+            this.log(`<span style="color:#10b981">▶ Running...</span>`);
+            this.timer = setInterval(() => { if (!this.step()) this.pause(); }, 450);
+        },
+
+        pause() {
+            if (this.isRunning) this.log(`<span style="color:#fbbf24">⏸ Paused.</span>`);
+            this.isRunning = false;
+            clearInterval(this.timer);
+        },
+        
+        log(msg) {
+            const l = document.getElementById('log');
+            l.innerHTML += `<div style="margin-bottom:3px; padding-bottom:3px; border-bottom:1px solid #1e293b">${msg}</div>`;
+            l.scrollTop = l.scrollHeight;
+        },
+
+        renderTape(activeRule, instant = false) {
+            const scrollInner = document.getElementById('tape-scroll-inner');
+            const CELL_W = 50;
+            const GAP = 4;
+
+            if (scrollInner.children.length !== this.tape.length) {
+                scrollInner.innerHTML = this.tape.map((ch, i) =>
+                    `<div class="cell${i === this.head ? ' active' : ''}">${ch}</div>`
+                ).join('');
+            } else {
+                this.tape.forEach((ch, i) => {
+                    const cell = scrollInner.children[i];
+                    cell.textContent = ch;
+                    cell.className = `cell${i === this.head ? ' active' : ''}`;
+                });
+            }
+
+            const targetOffset = (this.head * (CELL_W + GAP)) + (CELL_W / 2);
+
+            if (instant) {
+                scrollInner.style.transition = 'none';
+                scrollInner.style.transform = `translateX(-${targetOffset}px)`;
+                void scrollInner.offsetHeight;
+            } else {
+                scrollInner.style.transition = 'transform 0.3s ease-in-out';
+                scrollInner.style.transform = `translateX(-${targetOffset}px)`;
+            }
+
+            document.getElementById('status-badge').textContent = `State: ${this.state}`;
+            graphRenderer.highlightActive(this.state, activeRule);
+        }
+    };
+
+    const graphRenderer = {
+        svg: null, nodes: {}, edges: [],
+        render(rules) {
+            this.svg = document.getElementById('graph-svg');
+            const rect = this.svg.getBoundingClientRect();
+            this.svg.innerHTML = '';
+            const states = [...new Set(rules.flatMap(r => [r.s, r.ns]))];
+            const cx = rect.width / 2, cy = rect.height / 2;
+            const r = Math.min(cx, cy) * 0.7;
+
+            states.forEach((s, i) => {
+                const a = (i / states.length) * Math.PI * 2 - Math.PI / 2;
+                this.nodes[s] = { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+            });
+
+            this.edges = rules.map(rule => {
+                const s = this.nodes[rule.s], e = this.nodes[rule.ns];
+                const id = `e-${rule.s}-${rule.r}-${rule.ns}`;
+                const dx = e.x - s.x, dy = e.y - s.y, d = Math.sqrt(dx*dx + dy*dy) || 1;
+
+                let pathD;
+                if (rule.s === rule.ns) {
+                    const lx = s.x, ly = s.y - 50;
+                    pathD = `M${s.x},${s.y - 20} C${lx - 30},${ly - 20} ${lx + 30},${ly - 20} ${s.x},${s.y - 20}`;
+                } else {
+                    const qx = (s.x + e.x) / 2 + (dy / d) * 28;
+                    const qy = (s.y + e.y) / 2 - (dx / d) * 28;
+                    pathD = `M${s.x},${s.y} Q${qx},${qy} ${e.x},${e.y}`;
+                }
+
+                const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                p.setAttribute("d", pathD);
+                p.setAttribute("marker-end", "url(#arrowhead)");
+
+                const mx = (s.x + e.x) / 2 + (dy / d) * 20;
+                const my = (s.y + e.y) / 2 - (dx / d) * 20;
+                const lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                lbl.setAttribute("x", mx); lbl.setAttribute("y", my - 6);
+                lbl.setAttribute("text-anchor", "middle");
+                lbl.setAttribute("font-size", "10");
+                lbl.setAttribute("fill", "#64748b");
+                lbl.setAttribute("font-family", "monospace");
+                lbl.textContent = `${rule.r}/${rule.w},${rule.m}`;
+
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                g.setAttribute("class", "edge"); g.setAttribute("id", id);
+                g.appendChild(p); g.appendChild(lbl);
+                this.svg.appendChild(g);
+                return { ...rule, id };
+            });
+
+            states.forEach(s => {
+                const pos = this.nodes[s];
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                g.setAttribute("class", `node ${s === 'halt' ? 'halt' : ''}`);
+                g.setAttribute("id", `n-${s}`);
+
+                const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                c.setAttribute("cx", pos.x); c.setAttribute("cy", pos.y); c.setAttribute("r", "22");
+                g.appendChild(c);
+
+                const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                t.setAttribute("x", pos.x); t.setAttribute("y", pos.y + 5);
+                t.setAttribute("text-anchor", "middle");
+                t.textContent = s;
+                g.appendChild(t);
+                this.svg.appendChild(g);
+            });
+        },
+
+        highlightActive(s, rule) {
+            document.querySelectorAll('.node.active, .edge.active').forEach(el => el.classList.remove('active'));
+            const n = document.getElementById(`n-${s}`);
+            if (n) n.classList.add('active');
+            if (rule) {
+                const e = document.getElementById(`e-${rule.s}-${rule.r}-${rule.ns}`);
+                if (e) e.classList.add('active');
+            }
+        }
+    };
+
+    tm.init();
+</script>
+</body>
+</html>
