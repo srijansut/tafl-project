@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TuringVisual — Simulator</title>
+  <meta name="description" content="Interactive Turing Machine Simulator with live tape visualization, state diagram, and execution trace.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Colors assigned by prompt */
+      --bg-dark: #0a0a0a;
+      --text-main: #a1a1aa;
+      --title-color: #ffffff;
+      
+      --accent-gradient: linear-gradient(to right, #f97316, #fbbf24);
+      --accent-orange: #f97316;
+      --accent-yellow: #fbbf24;
+      
+      --blob-1: #ff4d00;
+      --blob-2: #e0115f;
+      --blob-3: #4b0082;
+      
+      --glass-bg: rgba(255, 255, 255, 0.03);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      
+      --success: #4ade80;
+      --error: #ff4d6d;
+      --cell-size: 72px;
+
+      /* Fallback grey variations */
+      --gray-400: #999999;
+      --gray-500: #666666;
+      --gray-600: #444444;
+      --gray-700: #2a2a2a;
+      --gray-800: #1a1a1a;
+      --gray-900: #0a0a0a;
+      --border: rgba(255,255,255,0.06);
+    }
+
+    html { height: 100%; overflow: hidden; background: var(--bg-dark); zoom: 0.85; }
+    body { height: 100%; overflow: hidden; background: var(--bg-dark); }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-main);
+      display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Noise overlay */
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 9999;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    }
+
+    /* ── MESH GRADIENT BLOBS ──────────────────────────── */
+    .glow {
+      position: fixed; border-radius: 50%;
+      filter: blur(100px); opacity: 0.15;
+      pointer-events: none; z-index: 0;
+    }
+    .glow-1 { top: -20%; left: -10%; width: 600px; height: 600px; background: var(--blob-1); animation: gfloat1 14s ease-in-out infinite; }
+    .glow-2 { top: 30%; right: -10%; width: 500px; height: 500px; background: var(--blob-2); animation: gfloat2 16s ease-in-out infinite alternate; }
+    .glow-3 { bottom: -20%; left: 0%; width: 700px; height: 700px; background: var(--blob-3); animation: gfloat3 18s ease-in-out infinite reverse; }
+    
+    @keyframes gfloat1 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(40px, 30px); } }
+    @keyframes gfloat2 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-30px, 40px); } }
+    @keyframes gfloat3 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(20px, -40px); } }
+
+    /* headings */
+    h1, h2, h3, .panel-title, .title-text { color: var(--title-color); }
+
+    /* ── HERO SECTION ──────────────────────────── */
+    .hero-section {
+      display: flex; flex-direction: column; align-items: flex-start;
+      padding: 28px 40px 14px 40px;
+      position: relative; z-index: 10;
+      gap: 10px;
+    }
+    .hero-title {
+      font-size: 3rem; font-weight: 800;
+      color: var(--title-color);
+      letter-spacing: -0.04em; line-height: 1;
+    }
+
+    /* Current State Status Pill */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 16px;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border-radius: 24px;
+      font-size: 0.75rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--title-color);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--gray-500);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .status-dot.active { background: var(--success); box-shadow: 0 0 12px rgba(74,222,128,0.6); }
+    .status-dot.halted { background: var(--accent-orange); box-shadow: 0 0 12px rgba(249,115,22, 0.6); }
+
+    /* ── WORKSPACE LAYOUT ────────────────────── */
+    #app {
+      flex: 1; display: grid;
+      grid-template-columns: 240px 1fr 340px;
+      grid-template-rows: auto 1fr;
+      gap: 24px; padding: 0 40px 40px 40px;
+      position: relative; z-index: 10;
+      overflow: hidden;
+    }
+
+    /* ── GLASS CARDS ────────────────────── */
+    .glass-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+    .panel-title {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .panel-badge {
+      font-size: 0.625rem; font-weight: 600; letter-spacing: 0.06em;
+      padding: 4px 12px;
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      color: var(--text-main);
+    }
+
+    /* ── TAPE AREA CARD ──────────────────────── */
+    .tape-area {
+      grid-column: 1 / -1; grid-row: 1;
+    }
+
+    .tape-viewport {
+      position: relative;
+      height: 112px;
+      overflow: hidden;
+    }
+    .tape-viewport::before,
+    .tape-viewport::after {
+      content: ''; position: absolute; top: 0; bottom: 0; z-index: 3;
+      width: 140px; pointer-events: none;
+    }
+    .tape-viewport::before { left: 0; background: linear-gradient(to right, var(--bg-dark), transparent); }
+    .tape-viewport::after  { right: 0; background: linear-gradient(to left, var(--bg-dark), transparent); }
+
+    .tape-pointer {
+      position: absolute; top: 0; bottom: 0;
+      left: 50%; transform: translateX(-0.5px);
+      width: 1px;
+      background: var(--accent-gradient);
+      z-index: 4; opacity: 0.5;
+    }
+
+    .tape-state-row {
+      display: flex; justify-content: center; align-items: center;
+      padding: 5px 0 2px;
+    }
+    .tape-head-label {
+      font-size: 1.6rem; font-weight: 800; color: var(--accent-orange);
+      letter-spacing: 0.06em;
+      transition: color 0.3s;
+      text-shadow: 0 0 16px rgba(249,115,22,0.5);
+      white-space: nowrap;
+    }
+
+    .tape-track {
+      display: flex; align-items: center;
+      height: 100%;
+      position: absolute; left: 50%;
+      transition: transform 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+
+    .cell {
+      min-width: var(--cell-size); height: var(--cell-size);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; font-weight: 500;
+      color: var(--gray-500);
+      border: 1px solid var(--glass-border);
+      margin: 0 2px;
+      flex-shrink: 0;
+      transition: all 0.35s cubic-bezier(0.23, 1, 0.32, 1);
+      position: relative;
+      border-radius: 12px;
+    }
+
+    /* Active Highlight Override */
+    .cell.active {
+      color: var(--title-color);
+      background: rgba(249, 115, 22, 0.08);
+      border-color: var(--accent-orange);
+      box-shadow: 0 0 20px rgba(249, 115, 22, 0.2), inset 0 0 20px rgba(249, 115, 22, 0.1);
+      transform: scale(1.08);
+      z-index: 2;
+    }
+    .cell.active::after {
+      content: '';
+      position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
+      width: 32px; height: 4px; border-radius: 2px;
+      background: var(--accent-gradient);
+    }
+
+    /* ── CONTROLS BAR ───────────────────────── */
+    .controls-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--glass-border);
+      padding: 0 12px;
+    }
+
+    /* ── HEAD POSITION BAR ───────────────────────── */
+    .head-pos-bar {
+      display: flex; align-items: center; gap: 10px;
+      border-top: 1px solid var(--glass-border);
+      padding: 8px 24px;
+    }
+    .head-pos-icon {
+      font-size: 0.85rem; color: var(--accent-orange); opacity: 0.8;
+    }
+    .head-pos-text {
+      font-size: 0.625rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--text-main);
+    }
+    .head-pos-value {
+      font-size: 0.875rem; font-weight: 700; color: var(--accent-yellow);
+      font-variant-numeric: tabular-nums;
+      margin-left: 4px;
+    }
+
+    .control-group { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 12px; }
+
+    .ctrl-input {
+      height: 36px; padding: 0 16px;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+      border-radius: 18px;
+      color: var(--title-color);
+      font-family: 'Inter', sans-serif; font-size: 0.875rem; font-weight: 500;
+      width: 160px; outline: none; transition: border-color 0.3s;
+    }
+    .ctrl-input:focus { border-color: var(--accent-orange); background: rgba(249,115,22,0.1); }
+
+    .ctrl-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 36px; padding: 0 20px;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+      color: var(--title-color); border-radius: 18px;
+      font-family: 'Inter', sans-serif; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      cursor: pointer; transition: all 0.25s;
+    }
+    .ctrl-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+    
+    .ctrl-btn:hover { background: rgba(255,255,255,0.1); }
+    
+    /* Primary action button styling */
+    .ctrl-btn-run, .ctrl-btn-load {
+      background: var(--accent-gradient);
+      color: var(--bg-dark);
+      border: none;
+    }
+    .ctrl-btn-run:hover, .ctrl-btn-load:hover {
+      background: var(--accent-gradient);
+      filter: brightness(1.1);
+      box-shadow: 0 4px 16px rgba(249,115,22,0.3);
+      color: var(--bg-dark);
+    }
+
+    .speed-group {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 24px;
+    }
+    .speed-label { font-size: 0.625rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-main); }
+    .speed-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 100px; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.1);
+      outline: none;
+    }
+    .speed-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent-yellow); cursor: pointer;
+      box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+    }
+
+    .timeline-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.1); outline: none;
+    }
+    .timeline-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent-orange); cursor: pointer;
+      box-shadow: 0 0 10px rgba(249, 115, 22, 0.5);
+    }
+
+    /* ── BOTTOM PANELS ──────────────────── */
+    .bottom-area {
+      display: contents;
+    }
+    
+    .trace-panel {
+      grid-column: 1; grid-row: 2;
+      min-width: 0;
+    }
+    
+    .graph-panel {
+      grid-column: 2; grid-row: 2;
+      min-width: 0;
+    }
+
+    #log {
+      flex: 1; overflow-y: auto;
+      padding: 16px 24px;
+    }
+    .log-entry {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--glass-border);
+      font-size: 0.8125rem; color: var(--text-main);
+      font-variant-numeric: tabular-nums;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-entry { cursor: pointer; transition: background 0.15s, padding-left 0.15s; }
+    .log-entry:hover { background: rgba(249,115,22,0.07); padding-left: 6px; color: var(--title-color); border-radius: 6px; }
+    .log-entry.log-active-step { background: rgba(249,115,22,0.12); border-left: 2px solid var(--accent-orange); padding-left: 10px; border-radius: 0 6px 6px 0; color: var(--title-color); }
+    .log-success { color: var(--success); }
+    .log-error { color: var(--error); }
+
+    /* State diagram */
+    #graph-container {
+      flex: 1; width: 100%; height: 100%; min-height: 200px;
+      position: relative; background: transparent;
+    }
+    #graph-container canvas, .vis-network:focus, .vis-network { outline: none; }
+
+    /* ── RULES PANEL ──── */
+    .rules-panel {
+      grid-column: 3; grid-row: 2;
+      min-width: 0;
+    }
+    
+    .rules-format {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+    
+    .rules-table-container {
+      flex: 1; overflow-y: auto; padding: 16px 24px;
+    }
+    .rules-table {
+      width: 100%; border-collapse: collapse; font-family: 'SF Mono', monospace; font-size: 0.75rem; color: var(--text-main);
+    }
+    .rules-table th { font-weight: 600; color: var(--accent-yellow); padding: 8px 4px; text-align: left; border-bottom: 1px solid var(--glass-border); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.625rem; }
+    .rules-table td { padding: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .rules-table input { width: 100%; background: rgba(0,0,0,0.2); border: 1px solid transparent; color: var(--title-color); font-family: inherit; font-size: inherit; text-align: center; padding: 6px 0; border-radius: 4px; }
+    .rules-table input:focus { border-color: var(--accent-orange); outline: none; background: rgba(255,255,255,0.05); }
+    .del-btn { background: transparent; border: none; color: var(--error); cursor: pointer; font-size: 1.25rem; opacity: 0.5; transition: opacity 0.2s; padding: 4px 8px; }
+    .del-btn:hover { opacity: 1; }
+
+    .rules-actions, .presets-bar {
+      display: flex; gap: 8px;
+      padding: 16px 24px;
+      border-top: 1px solid var(--glass-border);
+    }
+    .presets-bar { border-top: none; padding-top: 0; }
+    
+    .rules-btn, .preset-btn {
+      flex: 1; height: 36px;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+      font-family: 'Inter', sans-serif; font-size: 0.6875rem; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      border-radius: 18px; color: var(--title-color);
+      cursor: pointer; transition: all 0.25s;
+    }
+    .rules-btn:hover, .preset-btn:hover { background: rgba(255,255,255,0.15); }
+    .rules-btn-primary { background: var(--accent-gradient); color: var(--bg-dark); border: none; }
+    .rules-btn-primary:hover { filter: brightness(1.1); box-shadow: 0 4px 12px rgba(249,115,22,0.3); background: var(--accent-gradient); color: var(--bg-dark); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+    @media (max-width: 1000px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; overflow-y: auto; display: flex; flex-direction: column; }
+      .bottom-area { grid-template-columns: 1fr; display: flex; flex-direction: column; min-height: 600px; }
+      .rules-panel { min-height: 400px; }
+      .trace-panel { min-height: 300px; }
+      .graph-panel { min-height: 400px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Ambient Mesh Gradient Blobs -->
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+<div class="glow glow-3"></div>
+
+<!-- HERO SECTION -->
+<div class="hero-section">
+  <h1 class="hero-title">Turing.Visual</h1>
+  <div class="status-pill">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">IDLE — q0</span>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- TAPE -->
+  <div class="glass-card tape-area">
+
+    <div class="controls-bar">
+      <div class="control-group">
+        <input class="ctrl-input" type="text" id="input-string" value="110100" placeholder="Input string…">
+        <button class="ctrl-btn ctrl-btn-load" onclick="tm.load()">Load</button>
+      </div>
+      <div class="control-group">
+        <button class="ctrl-btn ctrl-btn-run" onclick="tm.run()">
+          <svg viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" stroke-linejoin="round"/></svg> Run
+        </button>
+        <button class="ctrl-btn ctrl-btn-pause" onclick="tm.pause()">Pause</button>
+        <button class="ctrl-btn ctrl-btn-step" onclick="tm.step()">Step</button>
+        <button class="ctrl-btn" onclick="tm.load()">Reset</button>
+      </div>
+      <div class="speed-group">
+        <span class="speed-label">Speed</span>
+        <input type="range" class="speed-slider" id="speed-slider" min="50" max="1000" value="400" step="50">
+      </div>
+    </div>
+
+    <div class="tape-viewport">
+      <div class="tape-pointer"></div>
+      <div class="tape-track" id="tape-track"></div>
+    </div>
+
+    <div class="tape-state-row">
+      <span class="tape-head-label" id="tape-head-label">q0</span>
+    </div>
+
+    <div class="head-pos-bar">
+      <span class="head-pos-icon">⊳</span>
+      <span class="head-pos-text">HEAD POSITION</span>
+      <span class="head-pos-value" id="head-pos-label">0</span>
+    </div>
+  </div>
+
+  <!-- BOTTOM (Trace & Graph) -->
+  <div class="bottom-area">
+    <div class="glass-card trace-panel">
+      <div class="panel-header" style="flex-wrap: wrap; gap: 12px; padding: 16px 24px;">
+        <span class="panel-title" style="flex: 1 1 auto;">Execution Trace</span>
+        <span class="panel-badge" id="step-count">0 Steps</span>
+        <div style="width: 100%; display: flex; align-items: center; gap: 12px;">
+          <span style="font-size:0.625rem; font-weight:600; color:var(--text-main); letter-spacing:0.04em;">TIMELINE</span>
+          <input type="range" class="timeline-slider" id="history-slider" min="0" max="0" value="0" step="1" oninput="tm.jumpToStep(parseInt(this.value))">
+        </div>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    <div class="glass-card graph-panel">
+      <div class="panel-header">
+        <span class="panel-title">State Diagram (DFA/NFA)</span>
+        <span class="panel-badge" id="state-count">0 States</span>
+      </div>
+      <div id="graph-container"></div>
+    </div>
+  </div>
+
+  <div class="glass-card rules-panel">
+    <div class="panel-header">
+      <span class="panel-title">Transition Table</span>
+      <span class="panel-badge">CSV</span>
+    </div>
+    <div class="rules-format">
+       <span style="font-size: 0.6875rem; color: var(--accent-yellow); letter-spacing: 0.06em; font-family: 'SF Mono', monospace;">Table Format</span>
+       <button class="rules-btn" onclick="addTableRow()" style="flex: 0 0 auto; padding: 0 12px; height: 24px;">+ Add Row</button>
+    </div>
+    <div class="rules-table-container">
+      <table id="transition-table" class="rules-table">
+        <thead>
+          <tr><th>State</th><th>Read</th><th>Next</th><th>Write</th><th>Move</th><th></th></tr>
+        </thead>
+        <tbody id="rules-tbody">
+        </tbody>
+      </table>
+    </div>
+    <div class="rules-actions">
+      <button class="rules-btn" onclick="tm.parseRules()">Update Graph</button>
+      <button class="rules-btn rules-btn-primary" onclick="tm.parseRules(); tm.load();">Apply & Reload</button>
+    </div>
+    <div class="presets-bar">
+      <button class="preset-btn" onclick="loadPreset('flip')">Bit Flip</button>
+      <button class="preset-btn" onclick="loadPreset('binary-inc')">Binary +1</button>
+      <button class="preset-btn" onclick="loadPreset('palindrome')">Palindrome</button>
+      <button class="preset-btn" onclick="loadPreset('an-bn')" style="color:var(--accent-orange);">a^n b^n</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── PRESETS ──────────────────────────────────────────────────────────────
+  const PRESETS = {
+    'flip': {
+      rules: [['q0', '1', 'q0', '0', 'R'], ['q0', '0', 'q0', '1', 'R'], ['q0', '☐', 'q_accept', '☐', 'L']],
+      input: '110100'
+    },
+    'binary-inc': {
+      rules: [['q0', '0', 'q0', '0', 'R'], ['q0', '1', 'q0', '1', 'R'], ['q0', '☐', 'q1', '☐', 'L'], ['q1', '1', 'q1', '0', 'L'], ['q1', '0', 'q_accept', '1', 'L'], ['q1', '☐', 'q_accept', '1', 'R']],
+      input: '1011'
+    },
+    'palindrome': {
+      rules: [['q0', '0', 'q1', '☐', 'R'], ['q0', '1', 'q3', '☐', 'R'], ['q0', '☐', 'qy', '☐', 'R'], ['q1', '0', 'q1', '0', 'R'], ['q1', '1', 'q1', '1', 'R'], ['q1', '☐', 'q2', '☐', 'L'], ['q2', '0', 'q5', '☐', 'L'], ['q2', '☐', 'qy', '☐', 'L'], ['q2', '1', 'qn', '1', 'L'], ['q3', '0', 'q3', '0', 'R'], ['q3', '1', 'q3', '1', 'R'], ['q3', '☐', 'q_accept', '☐', 'R'], ['q4', '1', 'q5', '☐', 'L'], ['q4', '☐', 'qy', '☐', 'L'], ['q4', '0', 'qn', '0', 'L'], ['q5', '0', 'q5', '0', 'L'], ['q5', '1', 'q5', '1', 'L'], ['q5', '☐', 'q0', '☐', 'R'], ['qy', '☐', 'q_accept', '☐', 'R'], ['qn', '0', 'qn', '0', 'L'], ['qn', '1', 'qn', '1', 'L'], ['qn', '☐', 'q_accept', '☐', 'R']],
+      input: '10101'
+    },
+    'an-bn': {
+      rules: [['q0', 'a', 'q1', 'x', 'R'], ['q1', 'a', 'q1', 'a', 'R'], ['q1', 'y', 'q1', 'y', 'R'], ['q1', 'b', 'q2', 'y', 'L'], ['q2', 'y', 'q2', 'y', 'L'], ['q2', 'a', 'q2', 'a', 'L'], ['q2', 'x', 'q0', 'x', 'R'], ['q0', 'y', 'q3', 'y', 'R'], ['q3', 'y', 'q3', 'y', 'R'], ['q3', '☐', 'q_accept', '☐', 'R']],
+      input: 'aaabbb'
+    }
+  };
+
+  const isHaltState = (state) => /halt|accept|final/i.test(state);
+
+  function addTableRow(r = ['', '', '', '', '']) {
+    const tbody = document.getElementById('rules-tbody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="${r[0]}" placeholder="q0"></td>
+      <td><input type="text" value="${r[1]}" placeholder="☐"></td>
+      <td><input type="text" value="${r[2]}" placeholder="q1"></td>
+      <td><input type="text" value="${r[3]}" placeholder="☐"></td>
+      <td><input type="text" value="${r[4]}" placeholder="R"></td>
+      <td style="width:24px"><button class="del-btn" onclick="this.parentElement.parentElement.remove()">×</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  function loadPreset(key) {
+    const p = PRESETS[key];
+    document.getElementById('rules-tbody').innerHTML = '';
+    p.rules.forEach(r => addTableRow(r));
+    document.getElementById('input-string').value = p.input;
+    tm.parseRules();
+    tm.load();
+  }
+
+  // ── TURING MACHINE ──────────────────────────────────────────────────────
+  let stepCounter = 0;
+
+  const tm = {
+    tape: [], head: 0, state: 'q0', transitions: {}, isRunning: false, timer: null, history: [],
+
+    init() { this.parseRules(); this.load(); },
+
+    parseRules() {
+      this.transitions = {};
+      const rulesForGraph = [];
+      const rows = document.querySelectorAll('#rules-tbody tr');
+      
+      rows.forEach(tr => {
+        const inputs = tr.querySelectorAll('input');
+        if (inputs.length < 5) return;
+        let s = inputs[0].value.trim().toLowerCase();
+        let r = inputs[1].value.trim();
+        let ns = inputs[2].value.trim().toLowerCase();
+        let w = inputs[3].value.trim();
+        let m = inputs[4].value.trim().toUpperCase();
+        
+        if (s && r && ns && w && m) {
+          this.transitions[`${s},${r}`] = { s, r, ns, w, m };
+          rulesForGraph.push({ s, r, ns, w, m });
+        }
+      });
+      
+      graphRenderer.render(rulesForGraph);
+      const states = [...new Set(rulesForGraph.flatMap(r => [r.s, r.ns]))];
+      document.getElementById('state-count').textContent = states.length + ' States';
+    },
+
+    load() {
+      this.pause();
+      const val = document.getElementById('input-string').value || '☐';
+      this.tape = val.split('');
+      this.head = 0;
+      this.state = 'q0';
+      stepCounter = 0;
+      document.getElementById('log').innerHTML = '';
+      document.getElementById('step-count').textContent = '0 Steps';
+      this.history = [];
+      this.saveHistory(null, 'Machine loaded — input: ' + val, 'info');
+      
+      this.renderTape(null, true);
+      this.updateStatus();
+      graphRenderer.highlightActive(this.state, null);
+    },
+
+    step() {
+      if (isHaltState(this.state)) { this.pause(); return false; }
+      const symbol = this.tape[this.head] || '☐';
+      const rule = this.transitions[`${this.state},${symbol}`];
+
+      if (!rule) {
+        stepCounter++;
+        this.saveHistory(null, `<div style="color:var(--text-main);font-size:0.7rem;margin-bottom:2px;">Step ${stepCounter}</div>NO FORMAL RULE DEFINED for (${this.state}, "${symbol}") — halted`, 'error');
+        this.state = 'halt';
+        this.pause(); this.updateStatus(); return false;
+      }
+
+      const prevState = this.state;
+      this.tape[this.head] = rule.w;
+      this.head += (rule.m.toUpperCase() === 'R' ? 1 : -1);
+      this.state = rule.ns.toLowerCase();
+
+      if (this.head < 0) { 
+        stepCounter++;
+        this.state = 'halt';
+        this.saveHistory(null, `<div style="color:var(--text-main);font-size:0.7rem;margin-bottom:2px;">Step ${stepCounter}</div>CRASH: Head moved off left end of tape (Left-Bounded)`, 'error');
+        this.pause(); this.updateStatus(); return false;
+      }
+      if (this.head >= this.tape.length) this.tape.push('☐');
+
+      stepCounter++;
+      const arrow = rule.m.toUpperCase() === 'R' ? '→' : '←';
+      this.saveHistory(rule, `<div style="color:var(--text-main);font-size:0.7rem;margin-bottom:4px;">Step ${stepCounter}</div>(${prevState}, ${symbol}) → write ${rule.w}, move ${arrow}, goto ${this.state}`, 'step');
+      
+      document.getElementById('step-count').textContent = stepCounter + ' Steps';
+      this.renderTape(rule, false);
+      this.updateStatus();
+
+      if (isHaltState(this.state)) {
+        this.saveHistory(null, `<div style="color:var(--success);font-weight:700;margin-top:8px;">Machine Halted — Accept or Halt State Reached</div>`, 'success');
+        this.pause(); return false;
+      }
+      return true;
+    },
+
+    run() {
+      if (this.isRunning) return;
+      this.isRunning = true;
+      this.log('Running…', 'info');
+      this.updateStatus();
+      const speed = 1050 - parseInt(document.getElementById('speed-slider').value);
+      this.timer = setInterval(() => { if (!this.step()) this.pause(); }, speed);
+    },
+
+    pause() {
+      if (this.isRunning) this.log('Paused', 'info');
+      this.isRunning = false;
+      clearInterval(this.timer);
+      this.updateStatus();
+    },
+
+    updateStatus() {
+      const dot = document.getElementById('status-dot');
+      const text = document.getElementById('status-text');
+      dot.className = 'status-dot';
+      if (isHaltState(this.state)) {
+        dot.classList.add('halted');
+        text.textContent = 'HALTED';
+      } else if (this.isRunning) {
+        dot.classList.add('active');
+        text.textContent = 'RUNNING — ' + this.state;
+      } else {
+        text.textContent = 'IDLE — ' + this.state;
+      }
+      document.getElementById('tape-head-label').textContent = this.state;
+    },
+
+    renderLogFromHistory() {
+      const el = document.getElementById('log');
+      el.innerHTML = this.history.map((h, idx) => {
+        const cls = h.type === 'error' ? 'log-error' : h.type === 'success' ? 'log-success' : h.type === 'info' ? 'log-info' : '';
+        const active = idx === stepCounter ? ' log-active-step' : '';
+        return `<div class="log-entry ${cls}${active}" data-step="${idx}">${h.msg}</div>`;
+      }).join('');
+      // scroll active entry into view
+      const activeEl = el.querySelector('.log-active-step');
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+      else el.scrollTop = el.scrollHeight;
+    },
+
+    saveHistory(rule, msg, type) {
+      if (this.history.length > stepCounter) {
+         this.history = this.history.slice(0, stepCounter);
+         this.renderLogFromHistory(); 
+      }
+      this.history.push({
+        tape: [...this.tape], head: this.head, state: this.state, msg, type, rule
+      });
+      document.getElementById('history-slider').max = stepCounter;
+      document.getElementById('history-slider').value = stepCounter;
+      this.log(msg, type);
+    },
+
+    jumpToStep(stepIdx) {
+      this.pause();
+      if (stepIdx >= this.history.length) return;
+      const snap = this.history[stepIdx];
+      
+      this.tape = [...snap.tape];
+      this.head = snap.head;
+      this.state = snap.state;
+      stepCounter = stepIdx;
+      
+      document.getElementById('step-count').textContent = stepCounter + ' Steps';
+      this.renderTape(snap.rule, true);
+      this.updateStatus();
+      this.renderLogFromHistory();
+      document.getElementById('history-slider').value = stepCounter;
+    },
+
+    log(msg, type) {
+      const el = document.getElementById('log');
+      const cls = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : type === 'info' ? 'log-info' : '';
+      const stepIdx = this.history.length - 1;
+      // remove previous active highlight
+      el.querySelectorAll('.log-active-step').forEach(e => e.classList.remove('log-active-step'));
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${cls} log-active-step`.trim();
+      entry.dataset.step = stepIdx;
+      entry.innerHTML = msg;
+      el.appendChild(entry);
+      el.scrollTop = el.scrollHeight;
+    },
+
+    renderTape(activeRule, instant = false) {
+      const track = document.getElementById('tape-track');
+      const CELL_W = 76; // cell + margin
+
+      if (track.children.length !== this.tape.length) {
+        track.innerHTML = this.tape.map((ch, i) =>
+          `<div class="cell${i === this.head ? ' active' : ''}">${ch}</div>`
+        ).join('');
+      } else {
+        this.tape.forEach((ch, i) => {
+          const cell = track.children[i];
+          cell.textContent = ch;
+          cell.className = 'cell' + (i === this.head ? ' active' : '');
+        });
+      }
+
+      const offset = (this.head * CELL_W) + (CELL_W / 2);
+      if (instant) {
+        track.style.transition = 'none';
+        track.style.transform = `translateX(-${offset}px)`;
+        void track.offsetHeight;
+      } else {
+        track.style.transition = 'transform 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        track.style.transform = `translateX(-${offset}px)`;
+      }
+
+      document.getElementById('head-pos-label').textContent = this.head;
+      graphRenderer.highlightActive(this.state, activeRule);
+    }
+  };
+
+  // ── GRAPH RENDERER (vis-network) ────────────────────────────────────────
+  const graphRenderer = {
+    network: null, visNodes: null, visEdges: null,
+    rulesList: [], lastActiveNode: null, lastActiveEdge: null,
+
+    colors: {
+      nodeBorder: '#3b82f6',
+      nodeBackground: '#0f172a',
+      nodeFont: '#e2e8f0',
+      haltBorder: '#3b82f6',
+      haltBackground: '#0f172a',
+      haltFont: '#e2e8f0',
+      activeBorder: '#F97316',
+      activeBackground: '#431407',
+      activeFont: '#fdba74',
+      edgeColor: '#94a3b8',
+      edgeFont: '#cbd5e1',
+      edgeActive: '#fb923c',
+      edgeActiveFont: '#fed7aa',
+    },
+
+    render(rules) {
+      this.rulesList = rules;
+      const stateNames = [...new Set(rules.flatMap(r => [r.s, r.ns]))];
+
+      const getSvg = (label, bg, stroke) => {
+        const isHalt = isHaltState(label);
+        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90">
+          <circle cx="45" cy="45" r="42" fill="${bg}" stroke="${stroke}" stroke-width="3"/>`;
+        if (isHalt) svg += `<circle cx="45" cy="45" r="34" fill="none" stroke="${stroke}" stroke-width="2.5"/>`;
+        svg += `<text x="45" y="52" font-family="Inter, sans-serif" font-size="21" fill="${stroke}" text-anchor="middle" font-weight="700">${label}</text>
+        </svg>`;
+        return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      };
+
+      this.nodesArr = stateNames.map(s => {
+        return {
+          id: s,
+          shape: 'image',
+          image: getSvg(s, this.colors.nodeBackground, this.colors.nodeBorder),
+          size: 52
+        };
+      });
+      
+      // Inject fake start node
+      this.nodesArr.push({ id: '__start', label: '', shape: 'text', size: 0 });
+
+      const edgeMap = new Map();
+      rules.forEach((rule) => {
+        const key = `${rule.s}→${rule.ns}`;
+        if (!edgeMap.has(key)) edgeMap.set(key, { from: rule.s, to: rule.ns, labels: [] });
+        edgeMap.get(key).labels.push(`${rule.r}, ${rule.w}, ${rule.m}`);
+      });
+
+      this.edgesArr = [];
+      // Edge from fake start to q0
+      if (stateNames.includes('q0')) {
+        this.edgesArr.push({ id: '__start_edge', from: '__start', to: 'q0', arrows: 'to', width: 1.5, color: this.colors.nodeBorder, length: 50 });
+      }
+
+      edgeMap.forEach((val, key) => {
+        const isSelf = (val.from === val.to);
+        this.edgesArr.push({
+          id: key, from: val.from, to: val.to,
+          label: val.labels.join('\n'),
+          arrows: { to: { enabled: true, scaleFactor: 0.8, type: 'arrow' } },
+          color: { color: this.colors.edgeColor, highlight: this.colors.edgeActive, hover: this.colors.edgeActive, opacity: 1 },
+          font: { size: 12, color: this.colors.edgeFont, face: 'Inter, sans-serif', strokeWidth: 3, strokeColor: '#0a0a0a', align: 'top', multi: true, background: isSelf ? '#1e293b' : 'rgba(10,10,10,0.7)' },
+          width: 2, hoverWidth: 0.5, selectionWidth: 1.5,
+          smooth: isSelf ? false : { enabled: true, type: 'dynamic' },
+          selfReference: { renderBehindTheNode: false, size: 25, angle: Math.PI / 2 }
+        });
+      });
+
+      this.visNodes = new vis.DataSet(this.nodesArr);
+      this.visEdges = new vis.DataSet(this.edgesArr);
+      const container = document.getElementById('graph-container');
+
+      if (this.network) this.network.destroy();
+      this.network = new vis.Network(container, { nodes: this.visNodes, edges: this.visEdges }, {
+        autoResize: true,
+        physics: {
+          enabled: true, solver: 'forceAtlas2Based',
+          forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.02, springLength: 120, springConstant: 0.08, damping: 0.5, avoidOverlap: 0.5 },
+          stabilization: { iterations: 200, fit: true }
+        },
+        layout: { randomSeed: 2 },
+        interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true, dragNodes: true },
+        nodes: { mass: 1 }, edges: { smooth: { enabled: true } }
+      });
+
+      this.network.once('stabilizationIterationsDone', () => {
+        this.network.setOptions({ physics: { enabled: false } });
+        this.network.fit({ animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+      });
+    },
+
+    highlightActive(currentState, rule) {
+      if (!this.visNodes || !this.visEdges) return;
+
+      const getSvg = (label, bg, stroke) => {
+        const isHalt = isHaltState(label);
+        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90">
+          <circle cx="45" cy="45" r="42" fill="${bg}" stroke="${stroke}" stroke-width="3"/>`;
+        if (isHalt) svg += `<circle cx="45" cy="45" r="34" fill="none" stroke="${stroke}" stroke-width="2.5"/>`;
+        svg += `<text x="45" y="52" font-family="Inter, sans-serif" font-size="21" fill="${stroke}" text-anchor="middle" font-weight="700">${label}</text>
+        </svg>`;
+        return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      };
+
+      if (this.lastActiveNode && this.lastActiveNode !== '__start') {
+        try { this.visNodes.update({ id: this.lastActiveNode,
+          image: getSvg(this.lastActiveNode, this.colors.nodeBackground, this.colors.nodeBorder)
+        }); } catch(e) {}
+      }
+      if (this.lastActiveEdge) {
+        try { this.visEdges.update({ id: this.lastActiveEdge,
+          color: { color: this.colors.edgeColor, highlight: this.colors.edgeActive, hover: this.colors.edgeActive, opacity: 1 },
+          font: { color: this.colors.edgeFont, size: 12, face: 'Inter, sans-serif', strokeWidth: 3, strokeColor: '#0a0a0a', align: 'top', multi: true }, width: 2
+        }); } catch(e) {}
+      }
+
+      try { this.visNodes.update({ id: currentState,
+        image: getSvg(currentState, this.colors.activeBackground, this.colors.activeBorder)
+      }); this.lastActiveNode = currentState; } catch(e) {}
+
+      if (rule) {
+        const edgeId = `${rule.s}→${rule.ns}`;
+        try { this.visEdges.update({ id: edgeId,
+          color: { color: this.colors.edgeActive, highlight: this.colors.edgeActive, hover: this.colors.edgeActive, opacity: 1 },
+          font: { color: this.colors.edgeActiveFont, size: 10, face: 'Inter, sans-serif', strokeWidth: 0, align: 'top', multi: true },
+          width: 2.5, shadow: { enabled: true, color: 'rgba(251,191,36,0.5)', size: 8, x: 0, y: 0 }
+        }); this.lastActiveEdge = edgeId; } catch(e) {}
+      } else { this.lastActiveEdge = null; }
+    }
+  };
+
+  // Click any log entry to jump to that step
+  document.getElementById('log').addEventListener('click', e => {
+    const entry = e.target.closest('[data-step]');
+    if (entry === null) return;
+    const step = parseInt(entry.dataset.step);
+    if (!isNaN(step)) {
+      tm.jumpToStep(step);
+    }
+  });
+
+  document.getElementById('speed-slider').addEventListener('input', () => {
+    if (tm.isRunning) {
+      clearInterval(tm.timer);
+      const speed = 1050 - parseInt(document.getElementById('speed-slider').value);
+      tm.timer = setInterval(() => { if (!tm.step()) tm.pause(); }, speed);
+    }
+  });
+
+  // Call loadPreset initially to boot table system
+  loadPreset('an-bn');
+</script>
+</body>
+</html>
